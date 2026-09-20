@@ -1,0 +1,25 @@
+project_id = "otksdfphbgneusgjvjzg"
+
+[functions.razorpay-webhook]
+verify_jwt = false
+
+[functions.create-razorpay-order]
+verify_jwt = false
+
+[functions.verify-razorpay-payment]
+verify_jwt = false
+
+[functions.pay-existing-order]
+verify_jwt = false
+
+[functions.pay-credit-dues]
+verify_jwt = false
+
+[functions.verify-credit-payment]
+verify_jwt = false
+
+[functions.admin-create-customer]
+verify_jwt = false
+
+[functions.send-push]
+verify_jwt = false
