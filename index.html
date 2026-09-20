@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- No viewport-fit=cover: with it, Capacitor's SystemBars plugin expects the
+     page to consume safe-area insets itself; without it, the Android shell
+     natively pads the WebView below the status/navigation bars. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ahmad Mart</title>
+    <meta name="description" content="Products delivered in 10 minutes" />
+    <meta name="author" content="Ahmad Mart" />
+
+    <!-- PWA manifest — enables "Add to Home Screen" + Web Push permission on iOS 16.4+ -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2e7d32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Ahmad Mart" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+
+    <meta property="og:title" content="Ahmad Mart" />
+    <meta property="og:description" content="Products delivered in 10 minutes" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="" />
+    <meta name="twitter:image" content="" />
+  </head>
+
+  <body>
+    <!-- Full-screen boot splash: the portrait brand artwork covers the entire
+         screen while the app loads (client-approved look). Styled inline so it
+         paints before any bundle arrives; main.tsx fades it out once React has
+         rendered. -->
+    <style>
+      #boot-splash { position: fixed; inset: 0; z-index: 99999; background: #071f23; transition: opacity 0.35s ease; }
+      #boot-splash img { width: 100%; height: 100%; object-fit: cover; }
+      /* Wide/landscape screens: show the whole artwork instead of a zoomed crop */
+      @media (min-aspect-ratio: 3/4) { #boot-splash img { object-fit: contain; } }
+    </style>
+    <div id="boot-splash" aria-hidden="true">
+      <img src="/logo.jpeg" alt="" />
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
