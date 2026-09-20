@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ahmad Mart</string>
+    <string name="title_activity_main">Ahmad Mart</string>
+    <string name="package_name">in.ahmadmart.app</string>
+    <string name="custom_url_scheme">in.ahmadmart.app</string>
+</resources>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fully transparent splash icon: the Android 12+ system launch screen
+     can't be removed, but with an invisible icon it renders as a plain
+     brand-colored frame (windowSplashScreenBackground) — the Flipkart/
+     Amazon approach — which flows straight into the in-app logo splash. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@android:color/transparent" />
+</shape>
