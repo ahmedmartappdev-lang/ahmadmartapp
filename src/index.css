@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --primary: 145 63% 42%;
+    --primary-foreground: 0 0% 100%;
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 222 25% 18%;
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 20% 98%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 145 63% 42%;
+    --radius: 0.75rem;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 25% 18%;
+    --sidebar-primary: 145 63% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 20% 98%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 214 20% 88%;
+    --sidebar-ring: 145 63% 42%;
+    --success: 145 63% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 45 93% 47%;
+    --warning-foreground: 150 30% 10%;
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+  }
+
+  .dark {
+    --primary: 145 55% 48%;
+    --primary-foreground: 0 0% 100%;
+    --background: 222 47% 8%;
+    --foreground: 210 20% 96%;
+    --card: 222 47% 10%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 47% 10%;
+    --popover-foreground: 210 20% 96%;
+    --secondary: 217 19% 16%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 217 19% 16%;
+    --muted-foreground: 215 15% 65%;
+    --accent: 217 19% 14%;
+    --accent-foreground: 210 20% 96%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 20% 96%;
+    --border: 217 19% 18%;
+    --input: 217 19% 18%;
+    --ring: 145 55% 48%;
+    --sidebar-background: 222 47% 8%;
+    --sidebar-foreground: 210 20% 96%;
+    --sidebar-primary: 145 55% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 19% 14%;
+    --sidebar-accent-foreground: 210 20% 96%;
+    --sidebar-border: 217 19% 18%;
+    --sidebar-ring: 145 55% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  /* HIDE SCROLLBAR UTILITIES */
+  .no-scrollbar::-webkit-scrollbar,
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar,
+  .hide-scrollbar {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  /* CUSTOM GLOW SHADOW FOR ACTIVE ORDERS */
+  .shadow-glow {
+    box-shadow: 0 0 15px hsl(145 63% 42% / 0.2);
+  }
+}
+
+@layer components {
+  .product-card {
+    @apply transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5;
+  }
+  .discount-badge {
+    @apply absolute top-2 left-2 bg-primary text-primary-foreground px-2.5 py-1 rounded-md text-sm font-extrabold shadow-sm;
+  }
+  .add-to-cart-btn {
+    @apply bg-transparent text-foreground hover:bg-primary hover:text-primary-foreground border border-border font-semibold transition-colors;
+  }
+  .quantity-control {
+    @apply flex items-center border-2 border-primary rounded-lg overflow-hidden;
+  }
+  .quantity-btn {
+    @apply h-8 w-8 flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/90 transition-colors;
+  }
+  .category-card {
+    @apply flex flex-col items-center gap-2 p-3 rounded-xl bg-gradient-to-br from-primary/5 to-primary/10 hover:from-primary/10 hover:to-primary/20 transition-all cursor-pointer;
+  }
+  .bottom-nav {
+    @apply fixed bottom-0 left-0 right-0 z-50 lg:hidden;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.06);
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+}
+
+/* Google Places autocomplete dropdown (.pac-container) is appended to <body>.
+   While a Radix modal dialog is open, body gets pointer-events: none, which the
+   dropdown inherits — suggestions become visible but unclickable. Restore
+   clickability and keep it above the dialog overlay (z-50). */
+.pac-container {
+  z-index: 10000 !important;
+  pointer-events: auto !important;
+}
+
+/* CUSTOM ANIMATIONS FOR ORDERS PROGRESS TRACKER */
+@keyframes pulse-green {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.pulse-dot {
+  animation: pulse-green 2s infinite ease-in-out;
+}
