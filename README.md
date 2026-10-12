@@ -4,7 +4,7 @@ Hyperlocal grocery & food delivery platform for Ambur — customers order from l
 
 ## What's inside
 
-One codebase, four roles:
+One codebase, four roles
 
 - **Customers** — browse stores and categories, search, cart, checkout (COD / Ahmad Credit), live order tracking, ratings.
 - **Vendors** — manage their menu/products, subcategories, view orders and payment settlements.
