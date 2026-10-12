@@ -37,20 +37,34 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
 
       setUploading(true);
       try {
-        const ext = file.name.split('.').pop();
-        const fileName = `${folder ? folder + '/' : ''}${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        // All images go through Cloudinary. The browser never holds the API
+        // secret: the cloudinary-sign edge function (JWT-protected) signs the
+        // upload parameters, then the file goes directly to Cloudinary.
+        // The old `bucket` prop doubles as the Cloudinary folder name.
+        const { data: sig, error: sigError } = await supabase.functions.invoke('cloudinary-sign', {
+          body: { folder: bucket },
+        });
+        if (sigError || !sig?.signature) {
+          throw new Error(sig?.error || sigError?.message || 'Could not authorize upload');
+        }
 
-        const { error } = await supabase.storage
-          .from(bucket)
-          .upload(fileName, file, { upsert: true });
+        const form = new FormData();
+        form.append('file', file);
+        form.append('api_key', sig.apiKey);
+        form.append('timestamp', String(sig.timestamp));
+        form.append('signature', sig.signature);
+        form.append('folder', sig.folder);
 
-        if (error) throw error;
+        const res = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`, {
+          method: 'POST',
+          body: form,
+        });
+        const result = await res.json();
+        if (!res.ok || !result.secure_url) {
+          throw new Error(result?.error?.message || 'Upload failed');
+        }
 
-        const { data: urlData } = supabase.storage
-          .from(bucket)
-          .getPublicUrl(fileName);
-
-        onChange(urlData.publicUrl);
+        onChange(result.secure_url);
         toast({ title: 'Image uploaded successfully' });
       } catch (err: any) {
         toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
@@ -58,23 +72,14 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
         setUploading(false);
       }
     },
-    [bucket, folder, onChange, toast]
+    [bucket, onChange, toast]
   );
 
   const handleRemove = useCallback(async () => {
-    if (!value) return;
-    // Extract path from URL to delete from storage
-    try {
-      const url = new URL(value);
-      const pathParts = url.pathname.split(`/object/public/${bucket}/`);
-      if (pathParts[1]) {
-        await supabase.storage.from(bucket).remove([decodeURIComponent(pathParts[1])]);
-      }
-    } catch {
-      // If URL parsing fails, just clear the value
-    }
+    // Clearing the reference is enough — unreferenced Cloudinary files are
+    // harmless and can be tidied from the Cloudinary media library if needed.
     onChange('');
-  }, [value, bucket, onChange]);
+  }, [onChange]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
