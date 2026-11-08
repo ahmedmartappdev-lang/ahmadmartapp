@@ -76,16 +76,19 @@ Deno.serve(async (req) => {
     const basicAuth = btoa(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`);
     let amountPaise: number | null = null;
     let rawPayload: unknown = null;
-    let notesCustomer: string | null = null;
+    let paymentStatus: string | null = null;
+    let paymentOrderId: string | null = null;
     try {
-      const res = await fetch(`https://api.razorpay.com/v1/payments/${razorpay_payment_id}`, {
-        headers: { Authorization: `Basic ${basicAuth}` },
-      });
+      const res = await fetch(
+        `https://api.razorpay.com/v1/payments/${encodeURIComponent(razorpay_payment_id)}`,
+        { headers: { Authorization: `Basic ${basicAuth}` } }
+      );
       if (res.ok) {
         const p = await res.json();
-        amountPaise = p.amount;
+        amountPaise = typeof p.amount === "number" ? p.amount : null;
         rawPayload = p;
-        notesCustomer = p?.notes?.customer_id || null;
+        paymentStatus = p.status ?? null;
+        paymentOrderId = p.order_id ?? null;
       } else {
         console.warn("Razorpay fetchPayment non-OK:", res.status);
         return json({ error: "Could not verify payment with gateway" }, 502);
@@ -96,10 +99,43 @@ Deno.serve(async (req) => {
     }
 
     if (amountPaise === null) return json({ error: "Could not determine paid amount" }, 502);
+    if (paymentOrderId !== razorpay_order_id) {
+      return json({ error: "Payment does not belong to this order" }, 400);
+    }
 
-    // 3. Ownership: payment notes.customer_id must match the JWT user.
-    if (notesCustomer && notesCustomer !== user.id) {
-      return json({ error: "Forbidden" }, 403);
+    // 2a. Only a captured payment reduces dues ('authorized' can still be
+    // auto-refunded). The payment.captured webhook records it later.
+    if (paymentStatus !== "captured") {
+      return json(
+        { error: `Payment not captured yet (status: ${paymentStatus ?? "unknown"})`, pending: paymentStatus === "authorized" },
+        409
+      );
+    }
+
+    // 3. Ownership + purpose, from the Razorpay ORDER notes that
+    // pay-credit-dues set on the server. Payment notes come from the
+    // browser's checkout options and are not trustworthy. Without this
+    // check, the payment of a normal product order could be replayed here
+    // to also wipe credit dues.
+    try {
+      const oRes = await fetch(
+        `https://api.razorpay.com/v1/orders/${encodeURIComponent(razorpay_order_id)}`,
+        { headers: { Authorization: `Basic ${basicAuth}` } }
+      );
+      if (!oRes.ok) {
+        console.warn("Razorpay fetchOrder non-OK:", oRes.status);
+        return json({ error: "Could not verify order with gateway" }, 502);
+      }
+      const o = await oRes.json();
+      if (o?.notes?.purpose !== "credit_dues") {
+        return json({ error: "Not a credit dues payment" }, 400);
+      }
+      if (o?.notes?.customer_id !== user.id) {
+        return json({ error: "Forbidden" }, 403);
+      }
+    } catch (e) {
+      console.warn("Razorpay fetchOrder error:", e);
+      return json({ error: "Gateway unreachable" }, 502);
     }
 
     const amountRupees = amountPaise / 100;
