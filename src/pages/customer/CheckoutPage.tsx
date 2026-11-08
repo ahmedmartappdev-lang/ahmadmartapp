@@ -59,7 +59,7 @@ const CheckoutPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const { user } = useAuthStore();
-  const { items, getTotalAmount, getDeliveryFee, getTotalItems } = useCartStore();
+  const { items, getTotalAmount, getDeliveryFee, getTotalItems, clearCart } = useCartStore();
   const { addresses, defaultAddress, isLoading: addressesLoading, addAddress, updateAddress } = useAddresses();
   const { availableCredit, creditLimit, dueAmount } = useCustomerCredits();
   const creditBalance = availableCredit;
@@ -253,6 +253,10 @@ const CheckoutPage: React.FC = () => {
           customerNotes: customerNotesFromInstructions || undefined,
         });
 
+        // Set once Razorpay's handler fires, i.e. the customer has paid.
+        // After that we must never cancel the order: if verify fails
+        // (network, timeout, capture still pending), the webhook settles it.
+        let paidAtGateway = false;
         try {
           const rzpResp = await openRazorpay({
             key: init.key_id,
@@ -270,20 +274,47 @@ const CheckoutPage: React.FC = () => {
             theme: { color: '#16a34a' },
           });
 
+          paidAtGateway = true;
           await verifyOnlinePayment.mutateAsync(rzpResp);
           setOrderSuccess({
             orderNumber: init.order_numbers.join(', '),
             ...snapshot,
           });
         } catch (modalErr: any) {
-          // Cancel the pending order on the server so vendors never see it
-          // and so the zombie row is marked failed immediately.
+          if (paidAtGateway) {
+            // Money has left the customer's account. Do not cancel; the
+            // razorpay-webhook confirms the order once Razorpay captures it.
+            toast.info('Payment received. We are confirming it; your order will appear in My Orders shortly.');
+            await clearCart().catch(() => undefined);
+            navigate('/orders');
+            return;
+          }
+
+          // Modal dismissed or payment failed: cancel the pending order on
+          // the server (via edge function; the RPC is service_role-only) so
+          // vendors never see it and the stock is released.
           try {
-            await supabase.rpc('cancel_pending_razorpay_order', {
-              p_razorpay_order_id: init.razorpay_order_id,
-            });
+            const { data: sessionData } = await supabase.auth.getSession();
+            const accessToken = sessionData?.session?.access_token;
+            const clientInternals = supabase as unknown as { supabaseUrl?: string; supabaseKey?: string };
+            const SUPABASE_URL = clientInternals.supabaseUrl || 'https://otksdfphbgneusgjvjzg.supabase.co';
+            const SUPABASE_KEY = clientInternals.supabaseKey;
+            if (accessToken) {
+              const cancelRes = await fetch(`${SUPABASE_URL}/functions/v1/cancel-razorpay-order`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'apikey': SUPABASE_KEY,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ razorpay_order_id: init.razorpay_order_id }),
+              });
+              if (!cancelRes.ok) {
+                console.warn('cancel-razorpay-order failed:', cancelRes.status, await cancelRes.text());
+              }
+            }
           } catch (cancelErr) {
-            console.warn('cancel_pending_razorpay_order failed:', cancelErr);
+            console.warn('cancel-razorpay-order failed:', cancelErr);
           }
 
           if (modalErr?.message === 'PAYMENT_CANCELLED') {
