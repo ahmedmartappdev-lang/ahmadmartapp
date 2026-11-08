@@ -13,6 +13,21 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const WEBHOOK_SECRET = Deno.env.get("RAZORPAY_WEBHOOK_SECRET");
+// Used only for read-only lookups (GET /v1/orders/{id}) on credit-dues payments.
+const RZP_KEY_ID = Deno.env.get("RAZORPAY_KEY_ID");
+const RZP_KEY_SECRET = Deno.env.get("RAZORPAY_KEY_SECRET");
+
+async function fetchRazorpayOrder(orderId: string): Promise<any> {
+  if (!RZP_KEY_ID || !RZP_KEY_SECRET) {
+    throw new Error("RAZORPAY_KEY_ID/SECRET not configured for webhook order lookup");
+  }
+  const basicAuth = btoa(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`);
+  const res = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}`, {
+    headers: { Authorization: `Basic ${basicAuth}` },
+  });
+  if (!res.ok) throw new Error(`Razorpay order lookup failed: ${res.status}`);
+  return await res.json();
+}
 
 async function hmacSha256Hex(secret: string, message: string): Promise<string> {
   const enc = new TextEncoder();
@@ -109,7 +124,40 @@ Deno.serve(async (req) => {
         if (!paymentEntity?.order_id || !paymentEntity?.id) {
           throw new Error("payment.captured missing order_id/id");
         }
+        if (paymentEntity.status && paymentEntity.status !== "captured") {
+          throw new Error(`payment.captured with status=${paymentEntity.status}`);
+        }
         const amountRupees = Number(paymentEntity.amount) / 100;
+
+        // Credit-dues payments (pay-credit-dues) have no rows in public.orders.
+        // Spot them by the Razorpay ORDER notes, which the server set
+        // (payment notes come from the browser and are not trusted).
+        const { count: orderRowCount, error: countErr } = await admin
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("razorpay_order_id", paymentEntity.order_id);
+        if (countErr) throw countErr;
+
+        if (!orderRowCount) {
+          const rzpOrder = await fetchRazorpayOrder(paymentEntity.order_id);
+          const notes = rzpOrder?.notes ?? {};
+          if (notes.purpose === "credit_dues" && notes.customer_id) {
+            const { error: credErr } = await admin.rpc("record_credit_payment", {
+              p_customer_id: notes.customer_id,
+              p_amount: amountRupees,
+              p_razorpay_order_id: paymentEntity.order_id,
+              p_razorpay_payment_id: paymentEntity.id,
+              p_razorpay_signature: null,
+              p_raw: paymentEntity,
+            });
+            if (credErr) throw credErr;
+            break;
+          }
+          throw new Error(
+            `no orders found for razorpay_order_id=${paymentEntity.order_id} and not a credit_dues order`
+          );
+        }
+
         const { error } = await admin.rpc("mark_razorpay_order_paid", {
           p_razorpay_order_id: paymentEntity.order_id,
           p_razorpay_payment_id: paymentEntity.id,
