@@ -108,30 +108,55 @@ Deno.serve(async (req) => {
 
     // 5. Fetch payment details from Razorpay for server-attested amount + method
     const basicAuth = btoa(`${RZP_KEY_ID}:${RZP_KEY_SECRET}`);
+    // The gateway lookup is mandatory: without it we can't confirm the amount
+    // or that the payment was captured. On failure the client must not
+    // cancel; the webhook settles the order once Razorpay captures it.
     let rzpAmountPaise: number | null = null;
     let rzpMethod: string | null = null;
     let rzpPayload: unknown = null;
+    let rzpStatus: string | null = null;
+    let rzpOrderId: string | null = null;
     try {
       const res = await fetch(
-        `https://api.razorpay.com/v1/payments/${razorpay_payment_id}`,
+        `https://api.razorpay.com/v1/payments/${encodeURIComponent(razorpay_payment_id)}`,
         { headers: { Authorization: `Basic ${basicAuth}` } }
       );
-      if (res.ok) {
-        const p = await res.json();
-        rzpAmountPaise = p.amount;
-        rzpMethod = p.method ?? null;
-        rzpPayload = p;
-      } else {
+      if (!res.ok) {
         console.warn("Razorpay fetchPayment non-OK:", res.status);
+        return json({ error: "Could not verify payment with gateway", retryable: true }, 502);
       }
+      const p = await res.json();
+      rzpAmountPaise = typeof p.amount === "number" ? p.amount : null;
+      rzpMethod = p.method ?? null;
+      rzpStatus = p.status ?? null;
+      rzpOrderId = p.order_id ?? null;
+      rzpPayload = p;
     } catch (e) {
       console.warn("Razorpay fetchPayment error:", e);
+      return json({ error: "Gateway unreachable", retryable: true }, 502);
     }
 
-    // 5a. If Razorpay returned an amount, confirm it matches our DB sum
+    if (rzpOrderId !== razorpay_order_id) {
+      console.error("Payment %s belongs to order %s, not %s", razorpay_payment_id, rzpOrderId, razorpay_order_id);
+      return json({ error: "Payment does not belong to this order" }, 400);
+    }
+
+    // 5a. Only a CAPTURED payment counts as paid. 'authorized' means the money
+    // is held but not settled (auto-capture off or delayed). If it is never
+    // captured, Razorpay refunds it automatically, so we must not mark the
+    // order paid yet. The payment.captured webhook marks it paid later.
+    if (rzpStatus !== "captured") {
+      console.warn("Payment %s not captured (status=%s)", razorpay_payment_id, rzpStatus);
+      return json(
+        { error: `Payment not captured yet (status: ${rzpStatus ?? "unknown"})`, pending: rzpStatus === "authorized" },
+        409
+      );
+    }
+
+    // 5b. Confirm the gateway amount matches our DB sum
     const expectedSumRupees = owned.reduce((sum, r) => sum + Number(r.total_amount), 0);
     const expectedPaise = Math.round(expectedSumRupees * 100);
-    if (rzpAmountPaise !== null && rzpAmountPaise !== expectedPaise) {
+    if (rzpAmountPaise === null || rzpAmountPaise !== expectedPaise) {
       console.error(
         "Gateway amount mismatch: gateway=%d expected=%d",
         rzpAmountPaise,
