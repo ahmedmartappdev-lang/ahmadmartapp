@@ -47,6 +47,131 @@ interface RequestBody {
   small_order_fee: number;
 }
 
+// ---------------------------------------------------------------------------
+// Server-side fee computation. Mirrors src/hooks/useDeliveryFeeConfig.ts
+// (computeDeliveryFee). Keep the two in sync. The order RPC trusts the fee
+// values it is given, so the edge function must not pass the client's
+// numbers through: a modified client could send delivery_fee = 0.
+// ---------------------------------------------------------------------------
+interface FeeConfig {
+  baseFee: number;
+  freeDeliveryThreshold: number;
+  platformFee: number;
+  surgeEnabled: boolean;
+  surgeMultiplier: number;
+  rainSurgeEnabled: boolean;
+  rainSurgeMultiplier: number;
+  peakHoursEnabled: boolean;
+  peakHoursMultiplier: number;
+  peakHoursStart: string;
+  peakHoursEnd: string;
+  smallOrderFeeEnabled: boolean;
+  smallOrderThreshold: number;
+  smallOrderFee: number;
+}
+
+const DEFAULT_FEE_CONFIG: FeeConfig = {
+  baseFee: 29,
+  freeDeliveryThreshold: 199,
+  platformFee: 5,
+  surgeEnabled: false,
+  surgeMultiplier: 1.5,
+  rainSurgeEnabled: false,
+  rainSurgeMultiplier: 1.3,
+  peakHoursEnabled: false,
+  peakHoursMultiplier: 1.2,
+  peakHoursStart: "12:00",
+  peakHoursEnd: "14:00",
+  smallOrderFeeEnabled: false,
+  smallOrderThreshold: 99,
+  smallOrderFee: 10,
+};
+
+function computeFees(config: FeeConfig, subtotal: number) {
+  if (subtotal >= config.freeDeliveryThreshold) {
+    return { deliveryFee: 0, platformFee: config.platformFee, smallOrderFee: 0 };
+  }
+  let fee = config.baseFee;
+  let surgeApplied = false;
+  let surgeMultiplier = 1;
+  if (config.surgeEnabled) {
+    surgeMultiplier = config.surgeMultiplier;
+    surgeApplied = true;
+  }
+  if (config.rainSurgeEnabled) {
+    surgeMultiplier = Math.max(surgeMultiplier, config.rainSurgeMultiplier);
+    surgeApplied = true;
+  }
+  if (config.peakHoursEnabled) {
+    // The browser uses its local clock (customers are in India). The edge
+    // runtime is UTC, so convert to IST (UTC+05:30).
+    const now = new Date();
+    const currentMinutes = (now.getUTCHours() * 60 + now.getUTCMinutes() + 330) % 1440;
+    const [startH, startM] = config.peakHoursStart.split(":").map(Number);
+    const [endH, endM] = config.peakHoursEnd.split(":").map(Number);
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+    if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
+      surgeMultiplier = Math.max(surgeMultiplier, config.peakHoursMultiplier);
+      surgeApplied = true;
+    }
+  }
+  if (surgeApplied) fee = Math.round(fee * surgeMultiplier);
+  let smallOrderFee = 0;
+  if (config.smallOrderFeeEnabled && subtotal < config.smallOrderThreshold) {
+    smallOrderFee = config.smallOrderFee;
+  }
+  return { deliveryFee: fee, platformFee: config.platformFee, smallOrderFee };
+}
+
+async function computeServerFees(admin: any, groups: VendorGroupInput[]) {
+  const qtyByProduct = new Map<string, number>();
+  for (const g of groups) {
+    for (const it of g.items) {
+      qtyByProduct.set(it.product_id, (qtyByProduct.get(it.product_id) ?? 0) + Number(it.quantity));
+    }
+  }
+  const { data: products, error: prodErr } = await admin
+    .from("products")
+    .select("id, selling_price, admin_selling_price")
+    .in("id", [...qtyByProduct.keys()]);
+  if (prodErr) throw prodErr;
+
+  // Same price rule as place_customer_order_with_credit.
+  let subtotal = 0;
+  for (const p of products ?? []) {
+    const admPrice = Number(p.admin_selling_price) || 0;
+    const price = admPrice > 0 ? admPrice : Number(p.selling_price) || 0;
+    subtotal += price * (qtyByProduct.get(p.id) ?? 0);
+  }
+
+  const { data: setting, error: setErr } = await admin
+    .from("app_settings")
+    .select("value")
+    .eq("key", "delivery_fee_config")
+    .maybeSingle();
+  if (setErr) throw setErr;
+
+  let config: FeeConfig = DEFAULT_FEE_CONFIG;
+  if (setting?.value) {
+    try {
+      const parsed = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
+      config = { ...DEFAULT_FEE_CONFIG, ...parsed };
+    } catch {
+      config = DEFAULT_FEE_CONFIG;
+    }
+  }
+
+  const fees = computeFees(config, subtotal);
+  const clamp = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+  return {
+    subtotal,
+    deliveryFee: clamp(fees.deliveryFee),
+    platformFee: clamp(fees.platformFee),
+    smallOrderFee: clamp(fees.smallOrderFee),
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -85,6 +210,26 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- 2b. Recompute fees server-side; ignore the client's fee numbers ---
+    let serverFees;
+    try {
+      serverFees = await computeServerFees(admin, body.vendor_groups);
+    } catch (feeErr) {
+      console.error("Server fee computation failed:", feeErr);
+      return json({ error: "Could not compute order fees" }, 500);
+    }
+    const clientFeeSum =
+      (Number(body.delivery_fee) || 0) + (Number(body.platform_fee) || 0) + (Number(body.small_order_fee) || 0);
+    const serverFeeSum = serverFees.deliveryFee + serverFees.platformFee + serverFees.smallOrderFee;
+    if (Math.abs(clientFeeSum - serverFeeSum) > 0.009) {
+      console.warn(
+        "Client fees differ from server fees; using server values. client=%s server=%s subtotal=%s",
+        clientFeeSum,
+        serverFeeSum,
+        serverFees.subtotal
+      );
+    }
+
     // --- 3. Create order rows via existing RPC. The RPC uses auth.uid(),
     //     so we must invoke it under the user's JWT to resolve the caller.
     const authed = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -101,9 +246,9 @@ Deno.serve(async (req) => {
         p_payment_method: "online",
         p_customer_notes: body.customer_notes ?? null,
         p_credit_used: 0,
-        p_delivery_fee: body.delivery_fee,
-        p_platform_fee: body.platform_fee,
-        p_small_order_fee: body.small_order_fee,
+        p_delivery_fee: serverFees.deliveryFee,
+        p_platform_fee: serverFees.platformFee,
+        p_small_order_fee: serverFees.smallOrderFee,
       }
     );
 
