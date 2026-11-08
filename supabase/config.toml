@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.send-push]
 verify_jwt = false
+
+[functions.cancel-razorpay-order]
+verify_jwt = false
