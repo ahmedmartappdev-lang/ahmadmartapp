@@ -13,7 +13,7 @@ One codebase, four roles
 
 ## Stack
 
-- **Frontend:** React 18 + TypeScript + Vite, Tailwind CSS, shadcn/ui, React Query, React Router
+- **Frontend:** React 18 + TypeScript + Vite, Tailwind CSS, shadcn/ui, React Query, React Routers
 - **Backend:** Supabase (Postgres + RLS, Auth, Storage, Edge Functions)
 - **Auth:** phone OTP (SMS via Nimbus, custom edge functions) and Google sign-in
 - **Maps:** Google Maps + Places for address selection and serviceability checks
